@@ -1,0 +1,71 @@
+В первую очередь прошу учесть, что я с этим разбирался давно (где-то год назад) и уже могу что-то неправильно помнить. Намного лучше неизбежность понимает zigo и heroxbd, IIRC.
+
+Проблема возникает из-за того, что в LSB процесс запуска и остановки может быть асимметричным, а в OpenRC — нет. В результате если либо для запуска, либо для остановки указана какая-то зависимость, то мы её переводим в use/need/after (в зависимости от конкретной зависимости).
+
+Дак вот, пример кольца:
+ * Found a solvable dependency loop: cryptdisks a> umountfs u> hwclock.sh a> checkroot n> cryptdisks.
+
+u> — use   (направление зависимоcти: ←)
+a> — after (направление зависимоcти: ←)
+n> — need  (направление зависимоcти: ←)
+
+1. По Debian-вской логике «cryptdisks» при запуске требует «checkroot», а при остановке выполняется после «umountfs». Это создаёт две зависимости:
+   - checkroot   n> cryptdisks   (on)
+   - cryptdisks  a> umountfs     (off)
+
+2. Далее по Debian-вской логике «hwclock.sh» запускается до «checkroot» и останавливается после остановки сервисов по макросу «$local_fs», который включает в себя «+mountall +mountall-bootclean +mountoverflowtmp +umountfs» («+» означает мягкость зависимости и превращает в данной ситуации «after» в «use»). В результате появляются зависимости:
+    - hwclock.sh a> checkroot    (on)
+    - umountfs   u> hwclock.sh   (off)
+
+
+Вот и получаем корректную загрузку в Debian:
+  checkroot ← cryptdisks ← hwclock.sh
+
+корректную выгрузку в Debian:
+  $local_fs (umountfs) → {hwclock.sh,cryptdisks}
+
+Но некорректную загрузку/выгрузку в OpenRC:
+  cryptdisks ← umountfs ← hwclock.sh ← checkroot ← cryptdisks
+
+А, грубо говоря, всё потому, что checkroot нужно делать только при загрузке, а umountfs только при выгрузке.
+
+В результате, единственный вариант избавиться от необходимости решать кольца — это подгонять зависимости под необходимость openrc. Но так как это пакет несущественный в Debian, сделать это малореально. Debian не будет загонять себя в каждые рамки, которые поставит каждая возможная init/rc-система. Другими словами, там просто другая система зависимостей.
+
+Конкретно в данной ситуации мой решатель делает следующее:
+ * Solving the loop by breaking umountfs u> hwclock.sh.
+
+
+Другие примеры колец:
+ * Found a solvable dependency loop: checkfs.sh p> checkfs n> mountall.sh p> mountall u> hwclock.sh a> checkroot n> checkfs.sh.
+ * Solving the loop by breaking mountall u> hwclock.sh.
+ * Found a solvable dependency loop: checkfs.sh p> checkfs n> mountall.sh p> mountall n> mountall-bootclean.sh p> mountall-bootclean u> hwclock.sh a> checkroot n> checkfs.sh.
+ * Solving the loop by breaking mountall-bootclean u> hwclock.sh.
+ * Found a solvable dependency loop: cryptdisks a> umountfs u> hwclock.sh a> checkroot n> cryptdisks-early a> lvm2 u> cryptdisks.
+ * Found a solvable dependency loop: cryptdisks a> umountfs u> hwclock.sh a> checkroot n> cryptdisks.
+ * Found a solvable dependency loop: cryptdisks a> umountfs u> hwclock.sh a> checkroot n> cryptdisks-early n> cryptdisks.
+ * Solving the loop by breaking umountfs u> hwclock.sh.
+ * Solving the loop by breaking lvm2 u> cryptdisks.
+ * Found a solvable dependency loop: plymouth u> rc.local u> rmnologin u> single u> plymouth.
+ * Found a solvable dependency loop: plymouth u> rc.local u> rmnologin u> plymouth.
+ * Found a solvable dependency loop: plymouth u> rc.local u> single u> plymouth.
+ * Found a solvable dependency loop: plymouth u> rc.local u> plymouth.
+ * Found a solvable dependency loop: plymouth u> rmnologin u> single u> plymouth.
+ * Found a solvable dependency loop: plymouth u> rmnologin u> plymouth.
+ * Found a solvable dependency loop: plymouth u> single u> plymouth.
+ * Solving the loop by breaking plymouth u> rc.local.
+ * Solving the loop by breaking rmnologin u> single.
+ * Solving the loop by breaking rc.local u> rmnologin.
+ * Solving the loop by breaking single u> plymouth.
+ * Found a solvable dependency loop: plymouth u> single u> rc.local u> plymouth.
+ * Found a solvable dependency loop: plymouth u> rmnologin u> plymouth.
+ * Found a solvable dependency loop: plymouth u> single u> rmnologin u> plymouth.
+ * Solving the loop by breaking plymouth u> single.
+ * Solving the loop by breaking single u> rc.local.
+ * Solving the loop by breaking rmnologin u> plymouth.
+ * Found a solvable dependency loop: plymouth u> rmnologin u> rc.local u> plymouth.
+ * Solving the loop by breaking rc.local u> plymouth.
+ * Found a solvable dependency loop: rc.local u> single u> rmnologin u> rc.local.
+ * Solving the loop by breaking rmnologin u> rc.local.  
+
+
+Многие из них уже более понятные (почему так получились), но разбирать каждое — требуется намного больше времени.
