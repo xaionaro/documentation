@@ -1,1 +1,1 @@
-[https://www.corejavaguru.com/bigdata/zookeeper/architecture](https://www.corejavaguru.com/bigdata/zookeeper/architecture)
+[cluster](https://www.corejavaguru.com/bigdata/zookeeper/architecture)
