@@ -564,3 +564,9 @@ $ go tool nm helloworld | grep -c DeadVariable
 
 0
 ```
+
+---
+
+# 99 bytes "Hello world" static binary
+
+There is an extreme example of reducing Go binary size in this repository: [github.com/xaionaro-go/tinyhelloworld](https://github.com/xaionaro-go/tinyhelloworld).
